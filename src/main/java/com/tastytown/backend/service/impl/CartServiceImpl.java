@@ -9,6 +9,8 @@ import com.tastytown.backend.dto.CartItemRequestDTO;
 import com.tastytown.backend.dto.CartResponseDTO;
 import com.tastytown.backend.entity.Cart;
 import com.tastytown.backend.entity.CartItem;
+import com.tastytown.backend.entity.Food;
+import com.tastytown.backend.entity.User;
 import com.tastytown.backend.mapper.CartMapper;
 import com.tastytown.backend.repository.CartRepository;
 import com.tastytown.backend.repository.FoodRepository;
@@ -26,57 +28,104 @@ public class CartServiceImpl implements ICartService {
 
     @Override
     public CartResponseDTO addItemToCart(String userId, CartItemRequestDTO cartItemRequestDTO) {
-        var user = userRepository.findById(userId).orElseThrow();
+        var user = getUserById(userId);
 
-        var cart = cartRepository.findByUser(user).orElseGet(
-            () -> {
-                var newCart = Cart.builder().user(user).build();
-                return cartRepository.save(newCart);
-            }
-        );
+        var cart = getOrCreateCartForUser(user);
 
-        var food = foodRepository.findById(cartItemRequestDTO.foodId()).orElseThrow();
+        var food = getFoodById(cartItemRequestDTO.foodId());
 
         // check if item already exists int the cart
         Optional<CartItem> existingCartItemOpt = cart.getItems().stream()
                 .filter(item -> item.getFood().getFoodId().equals(food.getFoodId())).findFirst();
 
-        if(existingCartItemOpt.isPresent()) {
+        if (existingCartItemOpt.isPresent()) {
             // update quantity if present
             CartItem existingCartItem = existingCartItemOpt.get();
-            existingCartItem.setQuantity(existingCartItem.getQuantity() + cartItemRequestDTO.quantity()); 
+            existingCartItem.setQuantity(existingCartItem.getQuantity() + cartItemRequestDTO.quantity());
         } else {
             // create a new cart item if not exist
             CartItem cartItem = CartItem.builder()
-                                .cart(cart)
-                                .food(food)
-                                .quantity(cartItemRequestDTO.quantity())
-                                .build();
-                                cart.getItems().add(cartItem);
+                    .cart(cart)
+                    .food(food)
+                    .quantity(cartItemRequestDTO.quantity())
+                    .build();
+            cart.getItems().add(cartItem);
         }
 
         var savedCart = cartRepository.save(cart);
         return CartMapper.convertToCartResponseDTO(savedCart);
     }
 
-    // @Override
-    // public CartResponseDTO getCartByUserId(String userId) {
-       
-    // }
+    @Override
+    public CartResponseDTO getCartByUserId(String userId) {
+        var user = getUserById(userId);
+        var cartOfUser = getOrCreateCartForUser(user);
+        return CartMapper.convertToCartResponseDTO(cartOfUser);
 
-    // @Override
-    // public CartResponseDTO updateItemQuantity(String userId, CartItemRequestDTO cartItemRequestDTO) {
-      
-    // }
+    }
 
-    // @Override
-    // public CartResponseDTO removeItemFromCart(String userId, String foodId) {
-       
-    // }
+    @Override
+    public CartResponseDTO updateItemQuantity(String userId, CartItemRequestDTO cartItemRequestDTO) {
+        var user = getUserById(userId);
+        var cart = getOrCreateCartForUser(user);
 
-    // @Override
-    // public CartResponseDTO clearCartItems(String userId) {
-       
-    // }
-    
+        var cartItem = getMatchedCartItemOfAnUser(cart, cartItemRequestDTO.foodId());
+
+        if (cartItemRequestDTO.quantity() <= 0) {
+            // Remove the Item
+            cart.getItems().remove(cartItem);
+        } else {
+            cartItem.setQuantity(cartItemRequestDTO.quantity());
+        }
+
+        var savedCart = cartRepository.save(cart);
+        return CartMapper.convertToCartResponseDTO(savedCart);
+    }
+
+    @Override
+    public CartResponseDTO removeItemFromCart(String userId, String foodId) {
+        var user = getUserById(userId);
+        var cart = getOrCreateCartForUser(user);
+        var cartItem = getMatchedCartItemOfAnUser(cart, foodId);
+
+        cart.getItems().remove(cartItem);
+        var savedCart = cartRepository.save(cart);
+
+        return CartMapper.convertToCartResponseDTO(savedCart);
+    }
+
+    @Override
+    public void clearCartItems(String userId) {
+        var user = getUserById(userId);
+        cartRepository.deleteByUser(user);
+
+    }
+
+    // helper methods
+    private CartItem getMatchedCartItemOfAnUser(Cart cart, String foodId) {
+        return cart.getItems().stream()
+                .filter(item -> item.getFood().getFoodId().equals(foodId)).findFirst()
+                .orElseThrow(() -> new NoSuchElementException("Food Not Found In The Cart"));
+
+    }
+
+    private User getUserById(String userId) {
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new NoSuchElementException("User Not Found with Id" + userId));
+    }
+
+    private Cart getOrCreateCartForUser(User user) {
+        return cartRepository.findByUser(user).orElseGet(
+                () -> {
+                    var newCart = new Cart();
+                    newCart.setUser(user);
+                    return cartRepository.save(newCart);
+                });
+    }
+
+    private Food getFoodById(String foodId) {
+        return foodRepository.findById(foodId)
+                .orElseThrow(() -> new NoSuchElementException("Food not found with id" + foodId));
+    }
+
 }
